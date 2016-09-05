@@ -1,0 +1,54 @@
+#!/bin/sh
+#\
+export LD_LIBRARY_PATH=$HOME/lib ; \
+export TCLLIBPATH=..
+#\ exec gdb --args tclsh8.4 "$0"
+#\ exec tclsh8.4 "$0"
+if {[lsearch [namespace children] ::tcltest] == -1} {
+    package require tcltest
+    namespace import -force ::tcltest::*
+}
+
+
+
+test yajl_parse-0.0 "require yajltcl" {
+  catch {package require yajltcl} version
+  return $version ;#TODO vcompare?
+} {2.0}
+
+if {1} {foreach cmd {
+{set yajl [yajl create #auto] }
+{set parsed [${yajl} parse {{"a":3,"b":4,"c":5}} ] }
+{objtype dump [lindex $parsed 0] }
+{$yajl reset  }
+{eval $yajl $parsed}
+{$yajl get}
+} { set rc [catch $cmd result];puts $cmd:$rc:$result } }
+
+
+
+
+
+if {0} {
+test yajl_tree-1.0 "yajl create #auto" {
+  catch {yajl create #auto} yajl_tree
+} {0}
+
+test yajl_tree-2.0 "yajl tree json" {
+  $yajl_tree tree {{"a":5,"b":4,"c":3}}
+} {}
+
+test yajl_tree-2.1 "yajl getkey a" {
+  set a [$yajl_tree getkey a ] ;#2011-may-20: yajl_tree_get() error!
+# set b [$yajl_tree getkey b ]
+} 5
+
+#puts [objtype dump $b ] ;#tree_parse double rozlisi?
+}
+
+
+# cleanup
+::tcltest::cleanupTests
+return
+
+# vim: syntax=tcl

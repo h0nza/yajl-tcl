@@ -1,0 +1,44 @@
+
+if {[lsearch [namespace children] ::tcltest] == -1} {
+    package require tcltest
+    namespace import -force ::tcltest::*
+}
+
+
+test yajl-0.0 "require yajltcl" {
+  catch {package require yajltcl} version
+  return $version ;#TODO vcompare?
+} {2.0}
+
+test yajl-1.0 "yajl usage" {
+  set rc [catch {yajl } result]
+  list $rc $result
+} {1 {wrong # args: should be "yajl create name ?-beautify 0|1? ?-indent string?"}}
+
+test yajl-2.0 "yajl create #auto" {
+  set rc [catch {yajl create #auto} yajl]
+  list $rc $yajl
+} {0 yajl0}
+
+test yajl-2.1 "\${yajl} generate ..." {
+  $yajl map_open\
+        string null    null\
+        string bool    bool     1\
+        string integer integer  3\
+        string double  double   2.125\
+        string number  number   3.14\
+        string string  string   "abc"\
+        string array\
+	       array_open\
+	       integer 1 integer 2 integer 3\
+	       array_close\
+        map_close
+  $yajl get
+} {{"null":null,"bool":true,"integer":3,"double":2.125,"number":3.14,"string":"abc","array":[1,2,3]}}
+
+
+# cleanup
+::tcltest::cleanupTests
+return
+
+# vim: syntax=tcl

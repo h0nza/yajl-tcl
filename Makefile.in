@@ -145,8 +145,12 @@ TCLSH   	= $(TCLSH_ENV) $(TCLSH_PROG)
 SHARED_BUILD	= @SHARED_BUILD@
 
 # NB FIX the configure script to do this the right way
-YAJLINCLUDES=-I"/usr/local/include"
-YAJLLIBS=-L"/usr/local/lib" -lyajl
+YAJLINCLUDES=@yajl_CFLAGS@
+YAJLINCLUDES= -I$(prefix)/include
+YAJLLIBS= @yajl_LIBS@
+
+tcldict_LIBS = @tcldict_LIBS@
+YAJLLIBS += $(tcldict_LIBS)
 
 INCLUDES	= @PKG_INCLUDES@ @TCL_INCLUDES@ $(YAJLINCLUDES)
 #INCLUDES	= @PKG_INCLUDES@ @TCL_INCLUDES@ @TK_INCLUDES@ @TK_XINCLUDES@

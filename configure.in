@@ -18,7 +18,7 @@ dnl	to configure the system for the local environment.
 # so you can encode the package version directly into the source files.
 #-----------------------------------------------------------------------
 
-AC_INIT([yajltcl], [1.2])
+AC_INIT([yajltcl], [2.0])
 
 #--------------------------------------------------------------------
 # Call TEA_INIT as the first TEA_ macro to set up initial vars.
@@ -59,6 +59,10 @@ TEA_PREFIX
 #-----------------------------------------------------------------------
 
 TEA_SETUP_COMPILER
+
+PKG_PROG_PKG_CONFIG(0.23)
+PKG_CHECK_MODULES([yajl], [yajl >= 2.0.3])
+PKG_CHECK_MODULES([tcldict], [tclDict >= 8.2.2])
 
 #-----------------------------------------------------------------------
 # __CHANGE__
@@ -159,6 +163,10 @@ TEA_ENABLE_SYMBOLS
 
 AC_DEFINE(USE_TCL_STUBS, 1, [Use Tcl stubs])
 #AC_DEFINE(USE_TK_STUBS, 1, [Use Tk stubs])
+
+#pokud Tcl version <= 8.4
+# --with-tcldict-stubs direct or stubs?
+AC_DEFINE(USE_DICT_STUBS, 1, [Use tclDict stubs])
 
 #--------------------------------------------------------------------
 # This macro generates a line to use when building a library.  It

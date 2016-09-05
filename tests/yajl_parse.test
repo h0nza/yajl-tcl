@@ -1,0 +1,76 @@
+
+if {[lsearch [namespace children] ::tcltest] == -1} {
+    package require tcltest
+    namespace import -force ::tcltest::*
+}
+
+
+test yajl_parse-0.0 "require yajltcl" {
+  catch {package require yajltcl} version
+  return $version ;#TODO vcompare?
+} {2.0}
+
+
+test yajl_parse-1.0 "yajl create #auto" {
+  catch {yajl create #auto} yajl_parse
+} {0}
+
+test yajl_parse-1.1 {$yajl reset} {
+  $yajl_parse reset
+} {}
+
+test yajl_parse-2.0 {$yajl parse null}  { $yajl_parse reset ; $yajl_parse parse null  } null
+test yajl_parse-2.1 {$yajl parse nu, ll} {
+    $yajl_parse reset ; $yajl_parse parse nu ; $yajl_parse parse ll  } null
+test yajl_parse-2.2 {$yajl parse nu ... ll} {
+    $yajl_parse reset
+    $yajl_parse parse \[nu               ;#=> array_open
+    set x [$yajl_parse parse ll,null\] ] ;#=> null null array_close
+    $yajl_parse parse_complete           ;#nic
+    set x
+    } {null null array_close}
+
+test yajl_parse-2.3 {$yajl parse true}  { $yajl_parse reset ; $yajl_parse parse true  } {bool 1}
+test yajl_parse-2.4 {$yajl parse false} { $yajl_parse reset ; $yajl_parse parse false } {bool 0}
+
+#TODO complete_parse ?data? ~? parse data + complete_parse
+test yajl_parse-2.5 {$yajl parse 123  } {
+ $yajl_parse reset ; $yajl_parse parse 123 ; $yajl_parse parse_complete } {number 123};#integer?
+
+test yajl_parse-2.6 {$yajl parse 1.25}  {
+ $yajl_parse reset ; $yajl_parse parse 1.25; $yajl_parse parse_complete } {number 1.25};#double?
+
+test yajl_parse-3.0 "\${yajl} parse ..." {
+  $yajl_parse reset
+  set json_parse [$yajl_parse parse \
+ {{"null":null,"bool":true,"integer":3,"double":2.125,"number":3.14,"string":"abc","array":[1,2,3]}} ]
+} {map_open map_key null null map_key bool bool 1 map_key integer number 3 map_key double number 2.125 map_key number number 3.14 map_key string string abc map_key array array_open number 1 number 2 number 3 array_close map_close}
+
+#foreach i $json_parse { puts [objtype dump $i ],$i }
+
+
+set json {{"null":null,"bool":true,"integer":3,"double":2.125,"number":3.14,"string":"abc","array":[1,2,3]}}
+puts [time {
+$yajl_parse reset
+$yajl_parse parse $json
+} 100000]
+
+ set x {map_open\
+        string null    null\
+        string bool    bool     1\
+        string integer integer  3\
+        string double  double   2.125\
+        string number  number   3.14\
+        string string  string   "abc"\
+        string array\
+	       array_open\
+	       integer 1 integer 2 integer 3\
+	       array_close\
+        map_close}
+
+
+# cleanup
+::tcltest::cleanupTests
+return
+
+# vim: syntax=tcl

@@ -1,0 +1,107 @@
+#!/bin/sh
+#\
+export LD_LIBRARY_PATH=$HOME/lib ; \
+export TCLLIBPATH=..
+#\
+exec gdb --args $HOME/bin/tclsh8.2 "$0"
+#\ exec tclsh8.4 "$0"
+
+if {[lsearch [namespace children] ::tcltest] == -1} {
+    package require tcltest
+    namespace import -force ::tcltest::*
+}
+
+
+test yajl_parse-0.0 "require yajltcl" {
+  catch {package require yajltcl} version
+  set version ;#TODO vcompare?
+} {2.0}
+
+
+test tcl_dict-8.5 "require dict" {
+  catch {package require dict} version
+  set version ;#TODO vcompare?
+} {8.5.2}
+
+test dict-8.5 "dict" {
+  catch {dict} usage ; set usage
+} {wrong # args: should be "dict subcommand ?arg ...?"}
+
+
+test json2dict-1.0 "json2dict usage" {
+  catch {yajl::json2dict} usage ; set usage
+} {wrong # args: should be "yajl::json2dict jsonText"}
+
+
+#check memleaks!!!
+#FIXME: volani $yajl inicializuje valueCache!!!
+  set    yajl_dict [yajl create #auto]
+  catch {$yajl_dict x}
+
+ test json2dict-1.0  "json2dict false"     { yajl::json2dict false } 0
+ test json2dict-1.1  "json2dict true"      { yajl::json2dict true  } 1
+ test json2dict-1.2  "json2dict null"      { yajl::json2dict null  } {null}
+
+ test json2dict-1.3  {json2dict {"a":null} }  { yajl::json2dict {{"a":null}} } {a null}
+
+ test json2dict-1.6  {json2dict 123      } { yajl::json2dict 123       } 123
+ test json2dict-1.7  {json2dict 123.456  } { yajl::json2dict 123.456   } 123.456
+
+#JSON array [] -> Tcl list
+ test json2dict-2.0 {json2dict []      }  { yajl::json2dict {[]}       } {}
+ test json2dict-2.1 {json2dict [null]  }  { yajl::json2dict {[null]}   } {null}
+ test json2dict-2.1 {json2dict [1]     }  { yajl::json2dict {[1]}      } {1}
+ test json2dict-2.2 {json2dict [1,2]   }  { yajl::json2dict {[1,2]}    } {1 2}
+ test json2dict-2.3 {json2dict [1,[2,3]]} { yajl::json2dict {[1,[2,3]]} } {1 {2 3}}
+
+#JSON map {} -> Tcl dict
+ test json2dict-3.0 {json2dict {}              }  { yajl::json2dict {{}}               } {}
+ test json2dict-3.1 {json2dict {"a":1}         }  { yajl::json2dict {{"a":1}}          } {a 1} ;#ObjType dict!?
+#tclDict preserve 'order'?
+ test json2dict-3.1 {json2dict {"a":1,"b":2}   }  { yajl::json2dict {{"a":1,"b":2}}    } {b 2 a 1}
+ test json2dict-3.3 {json2dict {"a":1,"b":{"b":2}} }  { yajl::json2dict {{"a":1,"b":{"b":2}}}  } {b {b 2} a 1}
+if 0 {
+}
+#array/map combined {[]} is bad, [{}] is OK
+#test json2dict-4.0 {json2dict {[]}             }  { yajl::json2dict {{[]}}             } {}
+ test json2dict-4.0 {json2dict [{}]             }  { yajl::json2dict {[{}]}             } {{}}
+ test json2dict-4.0 {json2dict [[]]             }  { yajl::json2dict {[[]]}             } {{}}
+ test json2dict-4.0 {json2dict [[[]]]           }  { yajl::json2dict {[[[]]]}           } {{{}}}
+ test json2dict-4.1 {json2dict [{"a":1},{"b":2}]}  { yajl::json2dict {[{"a":1},{"b":2}]}} {{a 1} {b 2}}
+ test json2dict-4.1 {json2dict [{"a":1},{"b":2}]}  { yajl::json2dict {[{"a":1},{"b":2}]}} {{a 1} {b 2}}
+
+#jansson have pack/unpack, type-template?
+
+#Tcl array -> JSON (jarray)
+set yajl_array [yajl create #auto]
+$yajl_array map_open
+foreach {n v} [array get env] { $yajl_array map_key $n string $v }
+$yajl_array map_close
+set env_json [$yajl_array get ]
+$yajl_array free
+
+puts $env_json
+puts [yajl::json2dict $env_json]
+puts [time {yajl::json2dict $env_json} 10] ;#test memleaks!!!
+
+
+proc K { x y } { set x }
+#jsarray.c : use .typePtr->name of values?
+proc jsarray { arrname } {
+  upvar $arrname arr
+  set gen [yajl create #auto]
+  $gen map_open
+  foreach {n v} [array get arr] { $gen map_key $n string $v }
+  $gen map_close
+# $gen free ;#catch finally!?
+  K [$gen get ] [$gen free ]
+}
+
+puts [jsarray tcl_platform]
+puts [time {jsarray env} 100]
+
+
+
+#puts [objtype dump [yajl::json2dict {[{"a":1},{"b":2}]} ]]
+
+# vim: syntax=tcl

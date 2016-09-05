@@ -10,8 +10,14 @@
 #include <tcl.h>
 #include "yajltcl.h"
 
+#ifndef  TLC_LINK_WIDE_INT
+#include "tclDict.h"
+#endif
+
 #undef TCL_STORAGE_CLASS
 #define TCL_STORAGE_CLASS DLLEXPORT
+
+EXTERN int yajltcl_Json2dictInit(Tcl_Interp *interp);
 
 
 /*
@@ -47,12 +53,23 @@ Yajltcl_Init(Tcl_Interp *interp)
 	return TCL_ERROR;
     }
 
+/* Tcl <= 8.4 needs tclDict, package dict */
+#ifdef USE_DICT_STUBS
+    if (Dict_InitStubs(interp, "8.5", 0) == NULL) {
+	return TCL_ERROR;
+    }
+#else
+#error PkgRequire(interp, "dict", "8.5", 0)
+#endif
+
     if (Tcl_PkgProvide(interp, "yajltcl", PACKAGE_VERSION) != TCL_OK) {
 	return TCL_ERROR;
     }
 
     /* Create the yajl command  */
     Tcl_CreateObjCommand(interp, "yajl", (Tcl_ObjCmdProc *) yajltcl_yajlObjCmd, (ClientData)NULL, (Tcl_CmdDeleteProc *)NULL);
+
+    yajltcl_Json2dictInit(interp);
 
     return TCL_OK;
 }

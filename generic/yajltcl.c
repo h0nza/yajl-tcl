@@ -6,9 +6,22 @@
 #include "yajltcl.h"
 #include <string.h>
 
+#ifndef CONST84
+#define CONST84
+#include "tclDict.h"
+#endif
+
+#ifndef EVENTCACHE
+#define EVENTCACHE 1
+#endif
+//#undef  EVENTCACHE
+
 
 /* PARSER STUFF */
 
+//XXX is Tcl_GetObjResult(interp) OK for stream parse?
+
+#ifndef EVENTCACHE
 static int
 append_result_list (Tcl_Interp *interp, char *type, Tcl_Obj *object) 
 {
@@ -25,13 +38,75 @@ append_string (Tcl_Interp *interp, char *string)
      Tcl_ListObjAppendElement (interp, Tcl_GetObjResult (interp), Tcl_NewStringObj (string, -1));
     return 1;
 }
+#endif
+
+
+static CONST84 char *options[] = {
+        "array_open",
+        "array_close",
+	"bool",
+	"double",
+	"integer",
+	"map_close",
+	"map_open",
+	"null",
+	"number",
+	"string",
+	"map_key",
+	"parse",
+	"parse_complete",
+	"tree",
+	"getkey",
+	"get",
+	"clear",
+	"reset",
+	"delete",
+	"free",
+	NULL
+    };
+
+enum options {
+        OPT_ARRAY_OPEN,
+	OPT_ARRAY_CLOSE,
+	OPT_BOOL,
+	OPT_DOUBLE,
+	OPT_INTEGER,
+	OPT_MAP_CLOSE,
+	OPT_MAP_OPEN,
+	OPT_NULL,
+	OPT_NUMBER,
+	OPT_STRING,
+	OPT_MAP_KEY,
+/* ^--- eventCache ---^ */
+	OPT_PARSE,
+	OPT_PARSE_COMPLETE,
+	OPT_TREE,//tree_parse()
+	OPT_GETKEY,//tree_get()
+	OPT_GET, //_tree or _gen?
+	OPT_CLEAR,
+	OPT_RESET,
+	OPT_DELETE,
+	OPT_FREE   //unused? noop
+    };
+
+/** "array_open" .. "map_key" index ObjType, parse events.
+ */
+static Tcl_Obj * eventCache[OPT_PARSE] = {NULL};
+
+/** cache, shared values Tcl_Obj: null, false/0, true/1, 2 ... 9?
+ */
+static Tcl_Obj * valueCache[10+1] = {NULL};
 
 static int
 null_callback (void *context)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
     append_string (interp, "null");
+#else
+    Tcl_ListObjAppendElement (interp, Tcl_GetObjResult (interp), valueCache[10]);
+#endif
     return 1;
 }
 
@@ -40,16 +115,33 @@ boolean_callback (void *context, int boolean)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
-     append_result_list (interp, "boolean", Tcl_NewBooleanObj(boolean));
+#ifndef EVENTCACHE
+    append_result_list (interp, "boolean", Tcl_NewBooleanObj(boolean));
+#else
+    Tcl_Obj *resultObj = Tcl_GetObjResult (interp);
+    Tcl_ListObjAppendElement (interp, resultObj, eventCache[OPT_BOOL]);
+    Tcl_ListObjAppendElement (interp, resultObj, valueCache[!!boolean]);
+#endif
     return 1;
 }
 
+#ifdef YAJL1
 static int
 integer_callback (void *context, long integerVal)
+#else
+static int
+integer_callback (void *context, long long integerVal)
+#endif
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_result_list (interp, "integer", Tcl_NewLongObj(integerVal));
+#else
+    Tcl_Obj *resultObj = Tcl_GetObjResult (interp);
+    Tcl_ListObjAppendElement (interp, resultObj, eventCache[OPT_INTEGER]);
+    Tcl_ListObjAppendElement (interp, resultObj, Tcl_NewLongObj(integerVal));//TODO Wide
+#endif
     return 1;
 }
 
@@ -58,16 +150,31 @@ double_callback (void *context, double doubleVal)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_result_list (interp, "double", Tcl_NewDoubleObj(doubleVal));
+#else
+    Tcl_Obj *resultObj = Tcl_GetObjResult (interp);
+    Tcl_ListObjAppendElement (interp, resultObj, eventCache[OPT_DOUBLE]);
+    Tcl_ListObjAppendElement (interp, resultObj, Tcl_NewDoubleObj(doubleVal));
+#endif
     return 1;
 }
 
+/*
+ * @note pokud je number callback, integer/double unused!!!
+ */
 static int
 number_callback (void *context, const char *s, unsigned int l)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_result_list (interp, "number", Tcl_NewStringObj(s, l));
+#else
+    Tcl_Obj *resultObj = Tcl_GetObjResult (interp);
+    Tcl_ListObjAppendElement (interp, resultObj, eventCache[OPT_NUMBER]);
+    Tcl_ListObjAppendElement (interp, resultObj, Tcl_NewStringObj(s, l));//>=Tcl8.5!!! Number
+#endif
     return 1;
 }
 
@@ -76,7 +183,13 @@ string_callback (void *context, const unsigned char *stringVal, unsigned int str
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_result_list (interp, "string", Tcl_NewStringObj((char *)stringVal, stringLen));
+#else
+    Tcl_Obj *resultObj = Tcl_GetObjResult (interp);
+    Tcl_ListObjAppendElement (interp, resultObj, eventCache[OPT_STRING]);
+    Tcl_ListObjAppendElement (interp, resultObj, Tcl_NewStringObj((char*)stringVal, stringLen));
+#endif
     return 1;
 }
 
@@ -85,7 +198,13 @@ map_key_callback (void *context, const unsigned char *stringVal, unsigned int st
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_result_list (interp, "map_key", Tcl_NewStringObj((char *)stringVal, stringLen));
+#else
+    Tcl_Obj *resultObj = Tcl_GetObjResult (interp);
+    Tcl_ListObjAppendElement (interp, resultObj, eventCache[OPT_MAP_KEY]);
+    Tcl_ListObjAppendElement (interp, resultObj, Tcl_NewStringObj((char*)stringVal, stringLen));
+#endif
     return 1;
 }
 
@@ -94,7 +213,11 @@ map_start_callback (void *context)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_string (interp, "map_open");
+#else
+    Tcl_ListObjAppendElement (interp, Tcl_GetObjResult (interp), eventCache[OPT_MAP_OPEN]);
+#endif
     return 1;
 }
 
@@ -103,7 +226,11 @@ map_end_callback (void *context)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_string (interp, "map_close");
+#else
+    Tcl_ListObjAppendElement (interp, Tcl_GetObjResult (interp), eventCache[OPT_MAP_CLOSE]);
+#endif
     return 1;
 }
 
@@ -112,7 +239,11 @@ array_start_callback (void *context)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_string (interp, "array_open");
+#else
+    Tcl_ListObjAppendElement (interp, Tcl_GetObjResult (interp), eventCache[OPT_ARRAY_OPEN]);
+#endif
     return 1;
 }
 
@@ -121,16 +252,28 @@ array_end_callback (void *context)
 {
     Tcl_Interp *interp = (Tcl_Interp *)context;
 
+#ifndef EVENTCACHE
      append_string (interp, "array_close");
+#else
+    Tcl_ListObjAppendElement (interp, Tcl_GetObjResult (interp), eventCache[OPT_ARRAY_CLOSE]);
+#endif
     return 1;
 }
 
 static yajl_callbacks callbacks = {
     null_callback,
     boolean_callback,
+#ifdef YAJL1
     integer_callback,
+#else
+    integer_callback, /**< 2.x.x: (void *ctx, long long integerVal) */
+#endif
     double_callback,
-    number_callback,
+#if 1
+    number_callback,  /**< => double/integer unused!!! TODO configurable? Tcl8.5? */
+#else
+    NULL,
+#endif
     string_callback,
     map_start_callback,
     map_key_callback,
@@ -183,7 +326,12 @@ yajltcl_recreate_parser (yajltcl_clientData *yajlData)
 {
     yajltcl_free_parser (yajlData);
 
+#ifdef YAJL1
     yajlData->parseHandle = yajl_alloc (&callbacks, &yajlData->parseConfig, NULL, yajlData->interp);
+#else
+    yajlData->parseHandle = yajl_alloc (&callbacks, NULL, yajlData->interp);
+//  yajl_config (yajlData->parseHandle, _opt, yajlData->parseConfig.xxx);
+#endif
 }
 
 
@@ -261,8 +409,13 @@ void
 yajltcl_recreate_generator (yajltcl_clientData *yajlData)
 {
     yajltcl_free_generator (yajlData);
-
+#ifdef YAJL1
     yajlData->genHandle = yajl_gen_alloc2 (yajltcl_print_callback, &yajlData->genConfig, NULL, yajlData);
+#else
+    yajlData->genHandle = yajl_gen_alloc (NULL);
+    yajl_gen_config (yajlData->genHandle, yajl_gen_print_callback, yajltcl_print_callback, yajlData);
+//  yajl_gen_config (yajlData->genHandle, yajlData->genConfig);
+#endif
 }
 
 
@@ -310,53 +463,28 @@ yajltcl_yajlObjectObjCmd(ClientData cData, Tcl_Interp *interp, int objc, Tcl_Obj
     yajl_gen hand = yajlData->genHandle;
     yajl_gen_status status = yajl_gen_status_ok;
     char *errString = NULL;
-
-    static CONST char *options[] = {
-        "array_open",
-        "array_close",
-	"bool",
-	"clear",
-	"double",
-	"integer",
-	"map_close",
-	"map_open",
-	"null",
-	"number",
-	"string",
-	"map_key",
-	"free",
-	"get",
-	"reset",
-	"delete",
-	"parse",
-	"parse_complete",
-	NULL
-    };
-
-    enum options {
-        OPT_ARRAY_OPEN,
-	OPT_ARRAY_CLOSE,
-	OPT_BOOL,
-	OPT_CLEAR,
-	OPT_DOUBLE,
-	OPT_INTEGER,
-	OPT_MAP_CLOSE,
-	OPT_MAP_OPEN,
-	OPT_NULL,
-	OPT_NUMBER,
-	OPT_STRING,
-	OPT_MAP_KEY,
-	OPT_FREE,
-	OPT_GET,
-	OPT_RESET,
-	OPT_DELETE,
-	OPT_PARSE,
-	OPT_PARSE_COMPLETE
-    };
+    char *string = NULL; int len; //for jsonData
 
     if (objc < 2) {
         Tcl_WrongNumArgs (interp, 1, objv, "option ?value? ?option ?value?...?");
 	return TCL_ERROR;
+    }
+
+    if (NULL == eventCache[0]) {
+       for (arg = 0; arg < OPT_PARSE; arg++) {
+           eventCache[arg] = Tcl_NewStringObj(options[arg], -1);
+	   Tcl_GetIndexFromObj (NULL, eventCache[arg], options, "option", TCL_EXACT, &optIndex);
+	   //check: arg == optIndex ?
+           Tcl_IncrRefCount(eventCache[arg]);//shared
+       }
+    }
+
+/* integer 0..9, 0 ~ false, 1 ~ true */
+    if (NULL == valueCache[0]) {
+       for (arg = 0; arg < 10; arg++) {
+            Tcl_IncrRefCount(valueCache[arg] = Tcl_NewLongObj(arg));
+       }
+            Tcl_IncrRefCount(valueCache[arg] = Tcl_NewStringObj("null",4));
     }
 
     for (arg = 1; arg < objc; arg++) {
@@ -365,6 +493,9 @@ yajltcl_yajlObjectObjCmd(ClientData cData, Tcl_Interp *interp, int objc, Tcl_Obj
 	    TCL_EXACT, &optIndex) != TCL_OK) {
 	    return TCL_ERROR;
 	}
+//
+//nebo plnit eventCache pomoci objv[arg] tady a ted!? pokud optIndex < OPT_PARSE
+// jde to? "map_key" pouziva "string"
 
 	switch ((enum options) optIndex) {
 	  case OPT_ARRAY_OPEN: {
@@ -480,8 +611,6 @@ yajltcl_yajlObjectObjCmd(ClientData cData, Tcl_Interp *interp, int objc, Tcl_Obj
 
 	  case OPT_MAP_KEY:
 	  case OPT_STRING: {
-	      char *string;
-	      int   len;
 
 	      if (arg + 1 >= objc) {
 		Tcl_WrongNumArgs (interp, 1, objv, "string value");
@@ -494,18 +623,22 @@ yajltcl_yajlObjectObjCmd(ClientData cData, Tcl_Interp *interp, int objc, Tcl_Obj
 	  }
 
 	  case OPT_PARSE: {
-	      char *string;
-	      int   len;
 
 	      if (arg + 1 >= objc) {
-		Tcl_WrongNumArgs (interp, 1, objv, "parse jsonText");
+err_need_json:	Tcl_WrongNumArgs (interp, 2, objv, "jsonText");
 		return TCL_ERROR;
 	      }
 
+//FIXME binary data ByteArray + encoding
 	      string = Tcl_GetStringFromObj (objv[++arg], &len);
 	      status = yajl_parse (yajlData->parseHandle, (unsigned char *)string, len);
 
-	      if (status != yajl_status_ok && status != yajl_status_insufficient_data) {
+check_parse_status:
+	      if (status != yajl_status_ok
+#ifdef YAJL1
+	       && status != yajl_status_insufficient_data
+#endif
+	         ) {
 	          unsigned char *str = yajl_get_error (yajlData->parseHandle, 1, (unsigned char *)string, len);
 		  Tcl_ResetResult (interp);
 		  Tcl_SetObjResult (interp, Tcl_NewStringObj ((char *)str, -1));
@@ -515,16 +648,80 @@ yajltcl_yajlObjectObjCmd(ClientData cData, Tcl_Interp *interp, int objc, Tcl_Obj
 	  }
 
 	  case OPT_PARSE_COMPLETE: {
+#ifdef YAJL1
 	      yajl_parse_complete (yajlData->parseHandle);
+#else
+	      status = yajl_complete_parse (yajlData->parseHandle); //FIXME check error!?
+  	      goto check_parse_status;
+#endif
 	      break;
 	  }
 
-	  case OPT_FREE: {
+	  case OPT_TREE: { //XXX
+	      char errbuf[1024];
+	      if (arg + 1 >= objc) {
+		 goto err_need_json;
+	      }
+//FIXME binary data ByteArray + encoding, XXX zutf8 string!
+	      string = Tcl_GetString (objv[++arg]);
+	      yajl_tree_free (yajlData->tree);
+	      if (NULL == (yajlData->tree = yajl_tree_parse (string, errbuf, sizeof(errbuf)))) {
+	         Tcl_SetObjResult(interp, Tcl_NewStringObj(string, -1));
+		 return TCL_ERROR;
+	      }
+  	      goto check_parse_status;
+	  }
+
+	  case OPT_GETKEY: { //getkey pathlist ?type?
+	      CONST84 char **pathv; int pathc;
+	      yajl_val node;
+
+	      if (arg + 1 >= objc) {
+                Tcl_WrongNumArgs (interp, 2, objv, "pathlist ?type?");
+		return TCL_ERROR;
+	      }
+
+	      if (TCL_OK != Tcl_SplitList(interp, Tcl_GetString(objv[++arg]), &pathc, &pathv)) {
+	         return TCL_ERROR;
+	      }
+
+	      node = yajl_tree_get(yajlData->tree, (const char**)pathv, yajl_t_any);
+//printf("node=%p type=%d\n", node, node ? node->type: -1);
+	      switch (node->type) {
+	      case yajl_t_number://IS_DOUBLE,INTEGER
+	           if      (node->u.number.flags & 0x01) {//INT
+	           Tcl_SetObjResult(interp, Tcl_NewIntObj(node->u.number.i));
+		   }
+	           else if (node->u.number.flags & 0x02) {//DOUBLE
+	           Tcl_SetObjResult(interp, Tcl_NewDoubleObj(node->u.number.d));
+		   }
+		   else {
+	           Tcl_SetObjResult(interp, Tcl_NewStringObj(node->u.number.r, -1));
+		   }
+		   break;
+	      case yajl_t_string:
+	           Tcl_SetObjResult(interp, Tcl_NewStringObj(node->u.string, -1));
+		   break;
+	      case yajl_t_null:
+	      case yajl_t_true:
+	      case yajl_t_false:
+	           Tcl_SetObjResult(interp, Tcl_NewBooleanObj(node->type == yajl_t_true));
+		   break;
+	      case yajl_t_array:
+	      case yajl_t_object:
+	      default:
+	        return TCL_ERROR;
+	      }
+	      break;
+	  }
+
+	  case OPT_FREE: { //XXX
 	  }
 
 	}
 
 	switch (status) {
+	  case yajl_gen_invalid_string: /*2.x.x TODO! */
 	  case yajl_gen_status_ok: {
 	      break;
 	  }
@@ -609,8 +806,8 @@ yajltcl_yajlObjCmd(clientData, interp, objc, objv)
     int                 i;
     char               *commandName;
 
-    static CONST char *options[] = {
-        "create",
+    static CONST84 char *options[] = {
+        "create",//TODO version|info?
 	NULL
     };
 
@@ -618,11 +815,13 @@ yajltcl_yajlObjCmd(clientData, interp, objc, objv)
         OPT_CREATE
     };
 
-    static CONST char *subOptions[] = {
-        "-beautify",
+    static CONST84 char *subOptions[] = {
+	//2.x.x enum yajl_gen_option + yajl_gen_config()
+        "-beautify",     //
         "-indent",
-	"-allowComments",
-	"-checkUTF8",
+	//2.x.x enum yajl_option + yajl_config()
+	"-allowComments",//allow_comments
+	"-checkUTF8",    //!dont_validate_strings
 	NULL
     };
 
@@ -654,6 +853,9 @@ yajltcl_yajlObjCmd(clientData, interp, objc, objv)
     yajlData->interp = interp;
     yajlData->genHandle = NULL;
     yajlData->parseHandle = NULL;
+#ifndef YAJL1
+    yajlData->tree = NULL;
+#endif
     Tcl_DStringInit (&yajlData->dString);
 
     for (i = 3; i < objc; i += 2) {
@@ -723,3 +925,230 @@ yajltcl_yajlObjCmd(clientData, interp, objc, objv)
     return TCL_OK;
 }
 
+/* JSON2DICT stuff */
+
+const char *nasrat(const char *lbl) { return lbl; }
+
+/** JSON2Dict callbacks context. */
+typedef struct StackVal_s {
+  Tcl_Obj *value;
+  Tcl_Obj *key;
+  enum options state; //-1
+} StackVal;
+
+typedef struct TableCtx_s {
+  Tcl_Interp  *interp;
+  yajl_handle  parseHandle; //config?
+  StackVal     stack[YAJL_MAX_DEPTH];
+  int          level; // 0..MAX-1
+//Tcl_CommandToken command;
+} TableCtx;
+
+static int null_dict_callback (void *context) {
+    TableCtx *ctx = (TableCtx *)context;
+    StackVal *stk;
+    if (ctx->level < 0) {
+	 Tcl_SetObjResult(ctx->interp, valueCache[10]);
+	 return 1;
+    }
+    stk = ctx->stack + ctx->level;
+    switch (stk->state) {
+    case OPT_ARRAY_OPEN:
+	 Tcl_ListObjAppendElement(ctx->interp, stk->value, valueCache[10]);
+         break;
+    case OPT_MAP_OPEN:
+	 Tcl_DictObjPut(ctx->interp, stk->value, stk->key, valueCache[10]);
+	 break;
+    default:
+	 return 0;
+    }
+    return 1;
+}
+
+static int boolean_dict_callback (void *context, int boolVal) {
+    TableCtx *ctx = (TableCtx *)context;
+    StackVal *stk;
+    if (ctx->level < 0) {
+	 Tcl_SetObjResult(ctx->interp, valueCache[!!boolVal]);
+	 return 1;
+    }
+    stk = ctx->stack + ctx->level;
+    switch (stk->state) {
+    case OPT_ARRAY_OPEN:
+	 Tcl_ListObjAppendElement(ctx->interp, stk->value, valueCache[!!boolVal]);
+         break;
+    case OPT_MAP_OPEN:
+	 Tcl_DictObjPut(ctx->interp, stk->value, stk->key, valueCache[!!boolVal]);
+	 break;
+    default:
+	 return 0;//memleak?
+    }
+    return 1;
+}
+
+static int string_dict_callback (void *context, const unsigned char *bytes, unsigned int length) {
+    TableCtx *ctx = (TableCtx *)context;
+    StackVal *stk;
+    Tcl_Obj *stringObj = Tcl_NewStringObj((char *)bytes, length);
+    if (ctx->level < 0) {
+	 Tcl_SetObjResult(ctx->interp, stringObj);
+	 return 1;
+    }
+    stk = ctx->stack + ctx->level;
+    switch (stk->state) {
+    case OPT_ARRAY_OPEN:
+	 Tcl_ListObjAppendElement(ctx->interp, stk->value, stringObj);
+         break;
+    case OPT_MAP_OPEN:
+	 Tcl_DictObjPut(ctx->interp, stk->value, stk->key, stringObj);
+	 break;
+    default:
+	 Tcl_DecrRefCount(stringObj);
+	 return 0;//TableCtx cleanup? memleaks?
+    }
+    return 1;
+}
+
+/* .state to MAP_OPEN, save .key
+ */
+static int map_key_dict_callback (void *context, const unsigned char *bytes, unsigned int length) {
+    TableCtx *ctx = (TableCtx *)context;
+    ctx->stack[ctx->level].key = Tcl_NewStringObj((char *)bytes, length);//cache/share keys?
+    return 1;
+}
+
+/** start map/object.
+- init/clear???
+- check: state==0/INIT?
+*/
+static int map_start_dict_callback (void *context) {
+    TableCtx *ctx = (TableCtx *)context;
+    StackVal *stk;
+/*re/initializace vyssi level: */
+    stk = ctx->stack + ++ctx->level;
+    stk->state = OPT_MAP_OPEN;
+    stk->value = Tcl_NewDictObj();
+    return 1;
+}
+
+/** end/close  map/object.
+- corrent state in map_open|map_value 
+- append current level to level-1, clean, level--
+- level==0 => final state!
+*/
+static int map_end_dict_callback (void *context) {
+    TableCtx *ctx = (TableCtx *)context;
+    StackVal *stk;
+    stk = ctx->stack + ctx->level--;
+    if (ctx->level == -1) { //final/DONE set ObjResult()
+       Tcl_SetObjResult(ctx->interp, stk->value);
+    }
+    else {//[level].value pripiseme na [level-1].value
+	switch (stk[-1].state) {
+	case OPT_ARRAY_OPEN:
+	     Tcl_ListObjAppendElement(ctx->interp, stk[-1].value, stk->value);
+	     break;
+	case OPT_MAP_OPEN:
+	     Tcl_DictObjPut(ctx->interp, stk[-1].value, stk[-1].key, stk->value);
+	     break;
+	default:
+	     return 0;//cleanup, memleaks?
+	}
+    }
+    return 1;
+}
+
+static int array_start_dict_callback (void *context) {
+    TableCtx *ctx = (TableCtx *)context;
+    StackVal *ctx2;
+/*re/initializace vyssi level: */
+    ctx2 = ctx->stack + ++ctx->level;
+    ctx2->state = OPT_ARRAY_OPEN;
+    ctx2->value = Tcl_NewListObj(0,NULL);
+    return 1;
+}
+
+
+static yajl_callbacks dict_callbacks = {
+    null_dict_callback,
+    boolean_dict_callback,
+    NULL,//integer_dict_callback,
+    NULL,//double_dict_callback,
+//  number_dict_callback,  /**< => double/integer unused!!! TODO configurable? Tcl8.5? */
+    string_dict_callback,//dtto number?
+    string_dict_callback,
+    map_start_dict_callback,
+    map_key_dict_callback,
+    map_end_dict_callback,
+    array_start_dict_callback,
+    map_end_dict_callback//array_end!
+};
+
+/** Parse JSONText info Tcl value, ListObj, DictObj or combined.
+ 
+ @todo TODO yajltcl_ErrorCode()
+ @todo C API for Mongrel2 headers?
+ */
+int
+yajltcl_Json2dictObjCmd(
+    ClientData clientData,		/* registered proc hashtable ptr. */
+    Tcl_Interp *interp,			/* Current interpreter. */
+    int objc,				/* Number of arguments. */
+    Tcl_Obj   *CONST objv[]
+) {
+    TableCtx *yajlData;
+    char *string ; int len;
+    yajl_status status;
+    int completed = 0;
+
+    yajlData = (TableCtx *)clientData;
+
+    if (objc != 2) {
+	Tcl_WrongNumArgs (interp, 1, objv, "jsonText");
+	return TCL_ERROR;
+    }
+
+//FIXME binary data ByteArray + encoding
+    string = Tcl_GetStringFromObj (objv[1], &len);
+    status = yajl_parse (yajlData->parseHandle, (unsigned char *)string, len);
+
+//complete()!!!
+
+check_parse_status:
+    if (status != yajl_status_ok
+#ifdef YAJL1
+     && status != yajl_status_insufficient_data
+#endif
+       ) {
+	unsigned char *str = yajl_get_error (yajlData->parseHandle, 1, (unsigned char *)string, len);
+	Tcl_ResetResult (interp);
+	Tcl_SetObjResult (interp, Tcl_NewStringObj ((char *)str, -1));
+	//free_error()?
+	return TCL_ERROR;
+    }
+
+//TODO yajltcl_ErrorCode() !!!
+    if (!completed) {
+         completed=1;
+	 status = yajl_complete_parse(yajlData->parseHandle);
+	 goto check_parse_status;
+    }
+
+    return TCL_OK;
+}
+
+/**
+ @todo TODO Json2dictDeleteProc
+ */
+int
+yajltcl_Json2dictInit(Tcl_Interp *interp) {
+  TableCtx *ctx;
+
+  ctx = malloc(sizeof *ctx);
+  ctx->parseHandle = yajl_alloc(&dict_callbacks, NULL , ctx);
+  yajl_config(ctx->parseHandle, yajl_allow_multiple_values, 1);//Hmm, reset ::= free+alloc ?
+  ctx->level = -1;
+  ctx->interp = interp;
+  Tcl_CreateObjCommand(interp, "::yajl::json2dict",yajltcl_Json2dictObjCmd,(ClientData)ctx, NULL);
+  return TCL_OK;
+}
